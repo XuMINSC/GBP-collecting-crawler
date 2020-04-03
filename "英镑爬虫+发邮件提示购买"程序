@@ -1,4 +1,4 @@
-# part1: 获取数据
+# Part1: 获取数据
 import time
 import datetime
 import requests
@@ -48,7 +48,7 @@ def get_exchange_rates():
         newdf.columns = pounds.columns
         pounds = pd.concat([pounds, newdf], axis = 0, ignore_index = True)
 
-# part2:查看最新的英镑汇率，如果英镑汇率低于某个特定值，则自动使用163邮箱发送邮件提醒买入；脱欧背景下阈值设置为：855元/100英镑=8.55
+# Part2:查看最新的英镑汇率，如果英镑汇率低于某个特定值，则自动使用163邮箱发送邮件提醒买入；脱欧背景下阈值设置为：855元/100英镑=8.55
 import email
 import smtplib
 from email.mime.text import MIMEText #负责构造文本
