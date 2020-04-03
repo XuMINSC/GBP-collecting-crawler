@@ -1,0 +1,102 @@
+# part1: 获取数据
+import time
+import datetime
+import requests
+import lxml.html
+import pandas as pd
+import matplotlib.pyplot as plt
+
+url = 'https://srh.bankofchina.com/search/whpj/search_cn.jsp' #网页链接
+
+headers = {
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Cache-Control': 'max-age=0',
+    'Connection': 'keep-alive',
+    'Content-Length': '65',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Host': 'srh.bankofchina.com',
+    'Origin': 'https://www.boc.cn',
+    'Referer': 'https://www.boc.cn/sourcedb/whpj/',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.117 Mobile Safari/537.36'
+} #设定request headers以伪装成浏览器，避免被服务器识别为爬虫
+
+pounds = pd.DataFrame(columns = ['Currencyin','Cashin','Currencyout','Cashout','Proxy','Time'])#先设定一个容器，用以容纳爬取的数据
+
+def get_exchange_rates():
+    date = datetime.datetime.now().strftime('%Y-%m-%d')
+    
+    form_data = {
+    'erectDate': date,
+    'nothing': date,
+    'pjname':'英镑'}#设置：向服务器提交表单数据，规定了获取英镑的起始和终止日期；此处设置为最新日期，如果程序运行于4月1日，就爬取4月1日的数据
+    
+    page = requests.post(url, headers = headers, data = form_data)
+    lxmlobject = lxml.html.fromstring(page.text)#向网页发起请求，并将网页源码转换为lxml对象
+    
+    #清洗网页，从中获取lxml对象中的英镑汇率信息，并将其存放于pandas的数据框中
+    info = lxmlobject.xpath('//div[@class="BOC_main publish"]')[0]
+    info1 = info.xpath('string(.)')
+    info2 = info1.split('英镑')
+    
+    global pounds
+    for i in info2[1:len(info2)]:
+        obs = i.replace('\t','').replace('\r','').split('\n')[1:7]
+        newdf = pd.DataFrame(obs).T
+        newdf.columns = pounds.columns
+        pounds = pd.concat([pounds, newdf], axis = 0, ignore_index = True)
+
+# part2:查看最新的英镑汇率，如果英镑汇率低于某个特定值，则自动使用163邮箱发送邮件提醒买入；脱欧背景下阈值设置为：855元/100英镑=8.55
+import email
+import smtplib
+from email.mime.text import MIMEText #负责构造文本
+from email.mime.image import MIMEImage #负责构造图片
+from email.mime.multipart import MIMEMultipart #负责连接多个part
+from email.header import Header
+
+ def check_and_send():
+    if float(pounds.iloc[len(pounds)-1,2]) < 855:
+        mail_host = 'smtp.163.com'
+        mail_sender = '***@163.com'#发送邮箱已经脱敏
+        mail_receiver = '***@163.com'#接收邮箱已经脱敏
+        mail_license = '****'#邮箱授权码已经脱敏
+        mm = MIMEMultipart('related')#
+        subject_content = '''买入英镑！'''#邮件主题
+
+        try:
+            #设置邮件头部内容
+            mm['From'] = 'Xu Min<m18008255389@163.com>' #注意遵守格式，<>内为发件邮箱
+            mm['To'] = 'receiver_1_name<Xu.Min@warwick.ac.uk>' #注意遵守格式，<>内为发件邮箱
+            mm['Subject'] = Header(subject_content,'utf-8')
+
+            #添加正文文本
+            body_content = '''现在英镑价格为{}，请保持关注'''.format(pounds.iloc[0,2])#邮件正文
+            message_text = MIMEText(body_content, 'plain','utf-8')
+            mm.attach(message_text) #加入所有文本
+
+            #发送邮件
+            stp = smtplib.SMTP(0)#创建SMTP对象，可以为0或('smtp-mail.outlook.com', 25)
+            stp.connect(mail_host, 25)#设置发件人邮箱的域名和端口，端口地址为25
+            stp.set_debuglevel(1) #固定为1，打印出和SMTP服务器交互的所有信息
+            stp.login(mail_sender, mail_license) #登录邮箱：地址和授权码
+            stp.sendmail(mail_sender, mail_receiver, mm.as_string()) #发送邮件：发件人和邮件内容
+            print('Successfully Sent!')
+            stp.quit()
+        except:
+            print('Something is wrong!')
+
+count = 0
+def monitoring():
+  for i in range(1,1000):
+    get_exchange_rates()
+    pounds.drop_duplicates(inplace = True)#去重重复数据
+    check_and_send()
+    count += 1 #计算运行次数
+    pounds.to_excel('/Users/apple/Desktop/pounds.xlsx',index = False)#将数据存入Excel文件中
+    Time = pd.to_datetime(pounds['Time'])
+    plt.xticks(rotation = 60)#为避免坐标轴重叠，将其旋转60度
+    plt.plot(pounds['Time'], pounds['Currencyout'],'b.', alpha = 0.05)#查看英镑走势
+    print('Succeeded for {} times at {}'.format(count, time.strftime('%Y-%m-%d %H:%M',time.gmtime())))
+    time.sleep(21600)
