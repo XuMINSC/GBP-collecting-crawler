@@ -1,0 +1,75 @@
+# Part1: 获取数据
+import time
+import datetime
+import requests
+import lxml.html
+import pandas as pd
+import matplotlib.pyplot as plt
+from pandas.plotting import register_matplotlib_converters
+
+url = 'https://srh.bankofchina.com/search/whpj/search_cn.jsp' #网页链接
+
+headers = {
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+    'Cache-Control': 'max-age=0',
+    'Connection': 'keep-alive',
+    'Content-Length': '65',
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Host': 'srh.bankofchina.com',
+    'Origin': 'https://www.boc.cn',
+    'Referer': 'https://www.boc.cn/sourcedb/whpj/',
+    'Upgrade-Insecure-Requests': '1',
+    'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.117 Mobile Safari/537.36'
+} #设定request headers以伪装成浏览器，避免被服务器识别为爬虫
+
+pounds = pd.DataFrame(columns = ['Currencyin','Cashin','Currencyout','Cashout','Proxy','Time'])#先设定一个容器，用以放置爬取的数据
+
+def get_exchange_rates(start = '2020-04-02', end = '2020-04-02'):
+    try:
+        for j in range(1,50000):
+            form_data = {
+            'erectDate': start,
+            'nothing': end,
+            'pjname':'英镑',
+            'page':'{}'.format(j),
+            'head':'head_620.js',
+            'bottom':'bottom_591.js'}#向服务器提交表单数据：英镑，起始日期，终止日期；此处将日期设置为最新日期。如：程序运行于4月1日，就爬取4月1日的数据
+            
+            page = requests.post(url, headers = headers, data = form_data)
+            lxmlobject = lxml.html.fromstring(page.text)#向网页发起请求，并将网页源码转换为lxml对象
+            
+            #清洗网页，从中获取lxml对象中的英镑汇率信息，并将其存放于pandas的数据框中
+            info = lxmlobject.xpath('//div[@class="BOC_main publish"]')[0]
+            info1 = info.xpath('string(.)')
+            info2 = info1.split('英镑')
+            
+            global pounds
+            for i in info2[1:len(info2)]:
+                obs = i.replace('\t','').replace('\r','').split('\n')[1:7]
+                newdf = pd.DataFrame(obs).T
+                newdf.columns = pounds.columns
+                pounds = pd.concat([pounds, newdf], axis = 0, ignore_index = True)
+            time.sleep(1)#设定休眠时间，避免对网站造成交大负担，从而被网站封锁
+    except:
+        pass
+    pounds.drop_duplicates(inplace = True)#去掉重复数据
+    pounds.iloc[:,0:5] = pounds.iloc[:,0:5].astype('float')#将前5列转换为数字
+    pounds['Time'] = pd.to_datetime(pounds['Time'])
+    pounds = pounds.sort_values(by = 'Time',ascending = True)
+    pounds.to_excel('/Users/apple/Desktop/poundtrend.xlsx',index = False)#将数据存入Excel文件中
+
+#Part 2:作图
+def plotting():
+    plt.xticks(rotation = 60)#为避免坐标轴重叠，将其旋转60度
+    register_matplotlib_converters()
+    plt.plot(pounds['Time'], pounds['Currencyout'],'b-')#查看英镑走势
+    plt.show()
+
+count = 0
+if __name__  == '__main__':
+    get_exchange_rates()
+    plotting()
+    count += 1 #计算运行次数
+    print('Succeeded for {} times at {}'.format(count, time.strftime('%Y-%m-%d %H:%M',time.gmtime())))

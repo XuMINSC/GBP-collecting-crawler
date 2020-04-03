@@ -5,6 +5,7 @@ import requests
 import lxml.html
 import pandas as pd
 import matplotlib.pyplot as plt
+from pandas.plotting import register_matplotlib_converters
 
 url = 'https://srh.bankofchina.com/search/whpj/search_cn.jsp' #网页链接
 
@@ -23,31 +24,42 @@ headers = {
     'User-Agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.117 Mobile Safari/537.36'
 } #设定request headers以伪装成浏览器，避免被服务器识别为爬虫
 
-pounds = pd.DataFrame(columns = ['Currencyin','Cashin','Currencyout','Cashout','Proxy','Time'])#先设定一个容器，用以容纳爬取的数据
+pounds = pd.DataFrame(columns = ['Currencyin','Cashin','Currencyout','Cashout','Proxy','Time'])#先设定一个容器，用以放置爬取的数据
 
 def get_exchange_rates():
     date = datetime.datetime.now().strftime('%Y-%m-%d')
-    
-    form_data = {
-    'erectDate': date,
-    'nothing': date,
-    'pjname':'英镑'}#设置：向服务器提交表单数据，规定了获取英镑的起始和终止日期；此处设置为最新日期，如果程序运行于4月1日，就爬取4月1日的数据
-    
-    page = requests.post(url, headers = headers, data = form_data)
-    lxmlobject = lxml.html.fromstring(page.text)#向网页发起请求，并将网页源码转换为lxml对象
-    
-    #清洗网页，从中获取lxml对象中的英镑汇率信息，并将其存放于pandas的数据框中
-    info = lxmlobject.xpath('//div[@class="BOC_main publish"]')[0]
-    info1 = info.xpath('string(.)')
-    info2 = info1.split('英镑')
-    
-    global pounds
-    for i in info2[1:len(info2)]:
-        obs = i.replace('\t','').replace('\r','').split('\n')[1:7]
-        newdf = pd.DataFrame(obs).T
-        newdf.columns = pounds.columns
-        pounds = pd.concat([pounds, newdf], axis = 0, ignore_index = True)
 
+    for j in range(1,100):
+        form_data = {
+            'erectDate': date,
+            'nothing': date,
+            'pjname':'英镑',
+            'page':'{}'.format(j),
+            'head':'head_620.js',
+            'bottom':'bottom_591.js'}#向服务器提交表单数据：英镑，起始日期，终止日期；此处将日期设置为最新日期。如：程序运行于4月1日，就爬取4月1日的数据
+                
+        page = requests.post(url, headers = headers, data = form_data)
+        lxmlobject = lxml.html.fromstring(page.text)#向网页发起请求，并将网页源码转换为lxml对象
+        
+        #清洗网页，从中获取lxml对象中的英镑汇率信息，并将其存放于pandas的数据框中
+        info = lxmlobject.xpath('//div[@class="BOC_main publish"]')[0]
+        info1 = info.xpath('string(.)')
+        info2 = info1.split('英镑')
+        
+        global pounds
+        for i in info2[1:len(info2)]:
+            obs = i.replace('\t','').replace('\r','').split('\n')[1:7]
+            newdf = pd.DataFrame(obs).T
+            newdf.columns = pounds.columns
+            pounds = pd.concat([pounds, newdf], axis = 0, ignore_index = True)
+    pounds.drop_duplicates(inplace = True)#去重重复数据
+    pounds.iloc[:,0:5] = pounds.iloc[:,0:5].astype('float')#将前5列转换为数字
+    pounds['Time'] = pd.to_datetime(pounds['Time'])
+    pounds = pounds.sort_values(by = 'Time',ascending = True)
+    pounds.to_excel('/Users/apple/Desktop/pounds.xlsx',index = False)#将数据存入Excel文件中
+
+
+# Part2: 判断汇率是否值得买入，并且发送邮件
 # Part2:查看最新的英镑汇率，如果英镑汇率低于某个特定值，则自动使用163邮箱发送邮件提醒买入；脱欧背景下阈值设置为：855元/100英镑=8.55
 import email
 import smtplib
@@ -56,7 +68,7 @@ from email.mime.image import MIMEImage #负责构造图片
 from email.mime.multipart import MIMEMultipart #负责连接多个part
 from email.header import Header
 
- def check_and_send():
+def check_and_send():
     if float(pounds.iloc[len(pounds)-1,2]) < 855:
         mail_host = 'smtp.163.com'
         mail_sender = '***@163.com'#发送邮箱已经脱敏
@@ -87,16 +99,19 @@ from email.header import Header
         except:
             print('Something is wrong!')
 
-count = 0
-def monitoring():
-  for i in range(1,1000):
-    get_exchange_rates()
-    pounds.drop_duplicates(inplace = True)#去重重复数据
-    check_and_send()
-    count += 1 #计算运行次数
-    pounds.to_excel('/Users/apple/Desktop/pounds.xlsx',index = False)#将数据存入Excel文件中
-    Time = pd.to_datetime(pounds['Time'])
+#Part 3:作图
+def plotting():
     plt.xticks(rotation = 60)#为避免坐标轴重叠，将其旋转60度
-    plt.plot(pounds['Time'], pounds['Currencyout'],'b.', alpha = 0.05)#查看英镑走势
-    print('Succeeded for {} times at {}'.format(count, time.strftime('%Y-%m-%d %H:%M',time.gmtime())))
-    time.sleep(21600)
+    register_matplotlib_converters()
+    plt.plot(pounds['Time'], pounds['Currencyout'],'b-')#查看英镑走势
+    plt.show()
+
+count = 0
+if __name__  == '__main__':
+    for i in range(1,5):
+        get_exchange_rates()
+        check_and_send()
+        plotting()
+        count += 1 #计算运行次数
+        print('Succeeded for {} times at {}'.format(count, time.strftime('%Y-%m-%d %H:%M',time.gmtime())))
+        time.sleep(21600)
